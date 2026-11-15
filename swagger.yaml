@@ -1,0 +1,55 @@
+openapi: 3.0.3
+info:
+  title: Oficina Mecânica — Faturamento
+  description: |
+    Serviço de Faturamento: catálogo, estoque, orçamento e pagamento pelo Mercado Pago.
+    Todas as rotas ficam sob `/api/billing`. O contrato entre os serviços está em
+    `docs/fase-4/CONTRATOS.md`, no repositório `oficina-api`.
+  version: 0.1.0
+servers:
+  - url: /
+paths:
+  /api/billing/health:
+    get:
+      summary: Liveness
+      description: O processo está de pé. Não consulta dependências.
+      tags: [Saúde]
+      security: []
+      responses:
+        "200":
+          description: Serviço no ar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+  /api/billing/ready:
+    get:
+      summary: Readiness
+      description: As dependências do serviço respondem.
+      tags: [Saúde]
+      security: []
+      responses:
+        "200":
+          description: Pronto para receber tráfego
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: Dependência indisponível
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Health:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+        service: { type: string, example: oficina-faturamento }
+        version: { type: string, example: 0.1.0 }
+        timestamp: { type: string, format: date-time }
+security:
+  - bearerAuth: []

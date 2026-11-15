@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - configmap.yaml
+  - nginx-configmap.yaml
+  - serviceaccount.yaml
+  - external-secret.yaml
+  - api-deployment.yaml
+  - hpa.yaml
+  - targetgroupbinding.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/name: oficina-faturamento
+      app.kubernetes.io/part-of: oficina-mecanica
+
+images:
+  - name: oficina-faturamento
+    newName: oficina-faturamento
+    newTag: local

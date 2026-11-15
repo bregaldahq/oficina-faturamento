@@ -1,0 +1,189 @@
+name: Deploy
+
+# docs/fase-4/CONTRATOS.md §9 (no oficina-api). `develop` implanta em hml, `main` em prod.
+# Ordem: testes -> infra/ (Terraform) -> imagem -> manifests -> rollout -> smoke.
+# Este pipeline não depende do de nenhum outro serviço.
+on:
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write # OIDC: nenhuma access key estática
+  contents: read
+
+jobs:
+  deploy:
+    name: Testes, infra, imagem e deploy
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && 'producao' || 'homologacao' }}
+    env:
+      AWS_REGION: us-east-1
+      ENVIRONMENT: ${{ github.ref == 'refs/heads/main' && 'prod' || 'hml' }}
+      OVERLAY: ${{ github.ref == 'refs/heads/main' && 'deploy/overlays/prod' || 'deploy/overlays/hml' }}
+      SERVICE: faturamento
+      APP: oficina-faturamento
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          extensions: pdo, pdo_sqlite, pdo_mysql, mbstring
+          coverage: pcov
+          tools: composer:v2
+
+      - name: Testes e cobertura mínima (o deploy não segue sem isso)
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          vendor/bin/phpunit --coverage-clover coverage.xml
+          php bin/check-coverage.php coverage.xml 80
+
+      - name: Autenticar na AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+          terraform_wrapper: false
+
+      - name: Infra do serviço (terraform apply)
+        working-directory: infra
+        run: |
+          set -euo pipefail
+          terraform init -input=false \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=oficina/${APP}/${ENVIRONMENT}/terraform.tfstate" \
+            -backend-config="region=us-east-1" \
+            -backend-config="dynamodb_table=oficina-tflock" \
+            -backend-config="encrypt=true"
+          terraform apply -auto-approve -input=false -var-file="envs/${ENVIRONMENT}.tfvars"
+
+      - name: Ler parâmetros do SSM
+        id: ssm
+        run: |
+          set -euo pipefail
+          get() { aws ssm get-parameter --name "$1" --query 'Parameter.Value' --output text; }
+          {
+            echo "ecr_url=$(get "/oficina/${ENVIRONMENT}/${SERVICE}/ecr_repository_url")"
+            echo "irsa_role_arn=$(get "/oficina/${ENVIRONMENT}/${SERVICE}/irsa_role_arn")"
+            echo "queue_url=$(get "/oficina/${ENVIRONMENT}/${SERVICE}/queue_url")"
+            echo "topic_arn=$(get "/oficina/${ENVIRONMENT}/messaging/topic_arn")"
+            echo "target_group_arn=$(get "/oficina/${ENVIRONMENT}/nlb/${SERVICE}/target_group_arn")"
+            echo "cluster_name=$(get "/oficina/${ENVIRONMENT}/eks/cluster_name")"
+            echo "namespace=$(get "/oficina/${ENVIRONMENT}/eks/namespace")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Login no ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build e push da imagem
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: production
+          push: true
+          tags: |
+            ${{ steps.ssm.outputs.ecr_url }}:${{ github.sha }}
+            ${{ steps.ssm.outputs.ecr_url }}:${{ env.ENVIRONMENT }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Configurar kubeconfig do EKS
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "${{ steps.ssm.outputs.cluster_name }}"
+
+      # O Secret oficina-newrelic é compartilhado pelos serviços do namespace; cada pipeline o
+      # reaplica com o mesmo valor.
+      - name: Aplicar Secret da license key do New Relic
+        id: nrsecret
+        env:
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          NS: ${{ steps.ssm.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$NS" create secret generic oficina-newrelic \
+            --from-literal=NEW_RELIC_LICENSE_KEY="$NEW_RELIC_LICENSE_KEY" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          echo "keyhash=$(printf '%s' "$NEW_RELIC_LICENSE_KEY" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Fixar imagem, target group, role e endereços no overlay
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" \
+            | tar xz -C /usr/local/bin kustomize
+          (cd "$OVERLAY" && kustomize edit set image "${APP}=${{ steps.ssm.outputs.ecr_url }}:${{ github.sha }}")
+          sed -i "s#TARGET_GROUP_ARN_PLACEHOLDER#${{ steps.ssm.outputs.target_group_arn }}#" deploy/base/targetgroupbinding.yaml
+          sed -i "s#IRSA_ROLE_ARN_PLACEHOLDER#${{ steps.ssm.outputs.irsa_role_arn }}#" deploy/base/serviceaccount.yaml
+          (cd "$OVERLAY" && kustomize edit add configmap "${APP}-config" --behavior=merge \
+            --from-literal=MESSAGING_TOPIC_ARN="${{ steps.ssm.outputs.topic_arn }}" \
+            --from-literal=MESSAGING_QUEUE_URL="${{ steps.ssm.outputs.queue_url }}")
+          kubectl kustomize "$OVERLAY"
+
+      - name: Aplicar manifests
+        run: kubectl apply -k "$OVERLAY"
+
+      - name: Propagar mudança da license key para os pods
+        env:
+          NS: ${{ steps.ssm.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$NS" patch deployment "$APP" \
+            -p '{"spec":{"template":{"metadata":{"annotations":{"oficina/newrelic-key-hash":"${{ steps.nrsecret.outputs.keyhash }}"}}}}}'
+
+      - name: Aguardar rollout
+        env:
+          NS: ${{ steps.ssm.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          if ! kubectl -n "$NS" rollout status "deployment/${APP}" --timeout=600s; then
+            kubectl -n "$NS" describe "deployment/${APP}" || true
+            kubectl -n "$NS" logs -l "app=${APP}" --all-containers --tail=200 || true
+            exit 1
+          fi
+
+      - name: Smoke test em /api/billing/ready
+        env:
+          NS: ${{ steps.ssm.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$NS" port-forward "svc/${APP}" 18080:80 >/tmp/pf.log 2>&1 &
+          PF_PID=$!
+          trap 'kill $PF_PID' EXIT
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/api/billing/ready > /tmp/ready.json; then ok=1; break; fi
+            sleep 3
+          done
+          [ "$ok" = "1" ] || { echo "::error::/api/billing/ready não respondeu"; cat /tmp/pf.log; exit 1; }
+          cat /tmp/ready.json
+          curl -fsS http://127.0.0.1:18080/api/billing/health > /dev/null
+
+      - name: Marcar deployment no New Relic
+        if: success()
+        continue-on-error: true
+        env:
+          NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          APP_NAME="${APP}-${ENVIRONMENT}"
+          GUID=$(curl -sS -X POST https://api.newrelic.com/graphql \
+            -H "Api-Key: $NEW_RELIC_API_KEY" -H 'Content-Type: application/json' \
+            -d "{\"query\":\"{ actor { entitySearch(query: \\\"name = '$APP_NAME' AND type = 'APPLICATION'\\\") { results { entities { guid } } } } }\"}" \
+            | jq -r '.data.actor.entitySearch.results.entities[0].guid // empty')
+          if [ -z "$GUID" ]; then
+            echo "::warning::Entidade '$APP_NAME' não encontrada no New Relic; marcação ignorada."
+            exit 0
+          fi
+          curl -sS -X POST https://api.newrelic.com/graphql \
+            -H "Api-Key: $NEW_RELIC_API_KEY" -H 'Content-Type: application/json' \
+            -d "{\"query\":\"mutation { changeTrackingCreateDeployment(deployment: { entityGuid: \\\"$GUID\\\", version: \\\"${GITHUB_SHA}\\\", user: \\\"${GITHUB_ACTOR}\\\", deploymentType: BASIC, description: \\\"Deploy ${ENVIRONMENT} via GitHub Actions\\\" }) { deploymentId } }\"}"

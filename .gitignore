@@ -1,0 +1,15 @@
+vendor/
+.env
+coverage-report/
+coverage.xml
+.phpunit.cache/
+.php-cs-fixer.cache
+*.log
+__pycache__/
+.claude/
+
+# Terraform
+infra/.terraform/
+*.tfstate
+*.tfstate.backup
+build/
