@@ -55,6 +55,9 @@ jobs:
       - name: Cobertura mínima de 80%
         run: php bin/check-coverage.php coverage.xml 80
 
+      - name: BDD (Behat)
+        run: vendor/bin/behat --no-colors
+
       # O relatório do PHPUnit traz caminhos absolutos do runner; o Sonar roda em container.
       - name: Ajustar caminhos do relatório para o Sonar
         if: env.SONAR_TOKEN != ''

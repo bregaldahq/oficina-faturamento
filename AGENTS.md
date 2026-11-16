@@ -8,8 +8,38 @@ repositório principal `oficina-mecanica`. O contrato entre os repos é
 `docs/fase-4/CONTRATOS.md`, no `oficina-api` (ele soma ao `docs/fase-3/CONTRATOS.md`). É
 normativo: se divergir daqui, o documento vence.
 
-**Estado: esqueleto.** Só existem `/api/billing/health` e `/api/billing/ready`. A regra de negócio,
-o worker e o acesso ao banco entram nas etapas seguintes do plano da Fase 4.
+## Camadas (`src/`)
+
+- **`Domain/`**: `Budget/Budget.php` é o agregado, um orçamento por OS, com a cobrança
+  (`Payment`) dentro. Transições nomeadas (`generate`, `failed`, `approve`, `reject`,
+  `attachPayment`, `confirmPayment`, `failPayment`, `recordRefund`, `recordLateRefund`,
+  `cancel`); **não existe `setStatus`**. Toda mudança que mexe no estoque registra um
+  `StockMovement`, e toda que o serviço de OS precisa saber, um evento. `Catalog/` tem o
+  serviço e a peça.
+- **`Application/`**: portas em `Port/` (o meio de pagamento é `PaymentGatewayInterface`);
+  `HandleIncomingMessageUseCase` (comandos da saga), `HandlePaymentNotificationUseCase` (avisos
+  do Mercado Pago), `UseCase/Budget/` (consultas e a resposta do cliente).
+- **`Infrastructure/`**: `Repository/` (PDO), `Payment/` (Mercado Pago, o falso e a assinatura
+  do webhook), `Aws/` (SNS e SQS), `ServiceFactory` (a montagem da API e do worker).
+- **`Presentation/`**: `CatalogController`, `BudgetController`, `PaymentWebhookController`.
+
+## Regras que não podem quebrar
+
+- **Estado, estoque e evento na mesma gravação.** Toda mudança passa por
+  `BudgetRepositoryInterface::save($budget, $outbox, $inboxMessageId)`. Nunca publique direto
+  no tópico nem mexa em `reserved_quantity` fora do repositório.
+- **O webhook do Mercado Pago não é fonte de verdade.** O estado vem sempre de
+  `PaymentGatewayInterface::getPayment()`. A assinatura é conferida antes de qualquer coisa.
+- **Chamada externa repetida não repete efeito.** Cobrança e estorno levam chave de
+  idempotência derivada do orçamento ou do pagamento.
+- **SQL comum a MySQL e SQLite.** Os testes rodam o repositório de produção em SQLite. Cada
+  parâmetro aparece uma vez no SQL (o MySQL, com prepared statement nativo, não aceita nome
+  repetido), e quantidades são ligadas com `PDO::PARAM_INT` (no SQLite, número comparado com
+  texto é sempre falso).
+- **Coluna nova** entra em `migrations/` e em `tests/Support/schema.sqlite.sql`;
+  `tests/Integration/SchemaTest.php` reprova se faltar num dos dois.
+- **O JSON do envelope é contrato.** `tests/Unit/Domain/MessageTest.php` tem o literal; os
+  outros serviços têm o mesmo.
 
 ## O que este repo tem
 
@@ -39,15 +69,16 @@ o worker e o acesso ao banco entram nas etapas seguintes do plano da Fase 4.
 
 ## Placeholders do deploy
 
-`TARGET_GROUP_ARN_PLACEHOLDER` (`deploy/base/targetgroupbinding.yaml`) e
-`IRSA_ROLE_ARN_PLACEHOLDER` (`deploy/base/serviceaccount.yaml`) **ficam como estão**: o
-`deploy.yml` troca os dois por `sed`.
+`TARGET_GROUP_ARN_PLACEHOLDER` (`deploy/base/targetgroupbinding.yaml`),
+`IRSA_ROLE_ARN_PLACEHOLDER` (`deploy/base/serviceaccount.yaml`) e `APP_IMAGE_PLACEHOLDER`
+(`deploy/base/migration-job.yaml`) **ficam como estão**: o `deploy.yml` troca os três por `sed`.
 
 ## Validar
 
 - A partir do repositório principal: `bin/ws verify --repo faturamento`.
-- Aqui: `make test`, `make coverage` (falha abaixo de 80% das linhas de `src/`), `make stan`,
-  `make lint`.
+- Aqui: `make test`, `make bdd`, `make coverage` (falha abaixo de 80% das linhas de `src/`),
+  `make stan`, `make lint`.
+- Contra MySQL e LocalStack: `bin/ws e2e --fase4`, no repositório principal.
 - Sem conta AWS, o teto do `infra/` é `terraform fmt` e `validate` sem backend.
 
 ## Convenções

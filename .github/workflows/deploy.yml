@@ -43,6 +43,7 @@ jobs:
           composer install --no-interaction --prefer-dist --no-progress
           vendor/bin/phpunit --coverage-clover coverage.xml
           php bin/check-coverage.php coverage.xml 80
+          vendor/bin/behat --no-colors
 
       - name: Autenticar na AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -80,6 +81,7 @@ jobs:
             echo "target_group_arn=$(get "/oficina/${ENVIRONMENT}/nlb/${SERVICE}/target_group_arn")"
             echo "cluster_name=$(get "/oficina/${ENVIRONMENT}/eks/cluster_name")"
             echo "namespace=$(get "/oficina/${ENVIRONMENT}/eks/namespace")"
+            echo "apigw_endpoint=$(get "/oficina/${ENVIRONMENT}/apigw/endpoint")"
           } >> "$GITHUB_OUTPUT"
 
       - name: Login no ECR
@@ -124,32 +126,54 @@ jobs:
           (cd "$OVERLAY" && kustomize edit set image "${APP}=${{ steps.ssm.outputs.ecr_url }}:${{ github.sha }}")
           sed -i "s#TARGET_GROUP_ARN_PLACEHOLDER#${{ steps.ssm.outputs.target_group_arn }}#" deploy/base/targetgroupbinding.yaml
           sed -i "s#IRSA_ROLE_ARN_PLACEHOLDER#${{ steps.ssm.outputs.irsa_role_arn }}#" deploy/base/serviceaccount.yaml
+          sed -i "s#APP_IMAGE_PLACEHOLDER#${{ steps.ssm.outputs.ecr_url }}:${{ github.sha }}#" deploy/base/migration-job.yaml
           (cd "$OVERLAY" && kustomize edit add configmap "${APP}-config" --behavior=merge \
             --from-literal=MESSAGING_TOPIC_ARN="${{ steps.ssm.outputs.topic_arn }}" \
+            --from-literal=MP_NOTIFICATION_URL="${{ steps.ssm.outputs.apigw_endpoint }}/api/billing/payments/webhook/mercadopago" \
             --from-literal=MESSAGING_QUEUE_URL="${{ steps.ssm.outputs.queue_url }}")
           kubectl kustomize "$OVERLAY"
 
       - name: Aplicar manifests
         run: kubectl apply -k "$OVERLAY"
 
+      # O Job usa o ConfigMap e o Secret que o apply acabou de criar, e termina antes do rollout:
+      # a versão nova do código só sobe com o schema que ela espera.
+      - name: Rodar Job de migration
+        env:
+          NS: ${{ steps.ssm.outputs.namespace }}
+        run: |
+          set -euo pipefail
+          kubectl -n "$NS" delete job oficina-faturamento-migrate --ignore-not-found --wait=true
+          kubectl -n "$NS" apply -f deploy/base/migration-job.yaml
+          if ! kubectl -n "$NS" wait --for=condition=complete job/oficina-faturamento-migrate --timeout=600s; then
+            kubectl -n "$NS" describe job oficina-faturamento-migrate || true
+            kubectl -n "$NS" logs job/oficina-faturamento-migrate --all-containers --tail=100 || true
+            exit 1
+          fi
+          kubectl -n "$NS" logs job/oficina-faturamento-migrate --all-containers --tail=50
+
       - name: Propagar mudança da license key para os pods
         env:
           NS: ${{ steps.ssm.outputs.namespace }}
         run: |
           set -euo pipefail
-          kubectl -n "$NS" patch deployment "$APP" \
-            -p '{"spec":{"template":{"metadata":{"annotations":{"oficina/newrelic-key-hash":"${{ steps.nrsecret.outputs.keyhash }}"}}}}}'
+          for deploy in "${APP}" "${APP}-worker"; do
+            kubectl -n "$NS" patch deployment "$deploy" \
+              -p '{"spec":{"template":{"metadata":{"annotations":{"oficina/newrelic-key-hash":"${{ steps.nrsecret.outputs.keyhash }}"}}}}}'
+          done
 
       - name: Aguardar rollout
         env:
           NS: ${{ steps.ssm.outputs.namespace }}
         run: |
           set -euo pipefail
-          if ! kubectl -n "$NS" rollout status "deployment/${APP}" --timeout=600s; then
-            kubectl -n "$NS" describe "deployment/${APP}" || true
-            kubectl -n "$NS" logs -l "app=${APP}" --all-containers --tail=200 || true
-            exit 1
-          fi
+          for deploy in "${APP}" "${APP}-worker"; do
+            if ! kubectl -n "$NS" rollout status "deployment/${deploy}" --timeout=600s; then
+              kubectl -n "$NS" describe "deployment/${deploy}" || true
+              kubectl -n "$NS" logs -l "app=${deploy}" --all-containers --tail=200 || true
+              exit 1
+            fi
+          done
 
       - name: Smoke test em /api/billing/ready
         env:

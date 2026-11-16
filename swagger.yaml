@@ -1,55 +1,701 @@
 openapi: 3.0.3
 info:
   title: Oficina Mecânica — Faturamento
-  description: |
-    Serviço de Faturamento: catálogo, estoque, orçamento e pagamento pelo Mercado Pago.
-    Todas as rotas ficam sob `/api/billing`. O contrato entre os serviços está em
-    `docs/fase-4/CONTRATOS.md`, no repositório `oficina-api`.
-  version: 0.1.0
+  version: 1.0.0
+  description: 'Serviço de Faturamento: catálogo, estoque, orçamento e pagamento pelo Mercado Pago.
+
+    Todas as rotas ficam sob `/api/billing`. O contrato entre os serviços está em `docs/fase-4/CONTRATOS.md`, no
+    repositório `oficina-api`.
+
+
+    O cliente (`customer`) só vê orçamentos e pagamentos dele; o resto é de `admin`. Os dois webhooks não usam JWT.'
 servers:
-  - url: /
+- url: /
+security:
+- bearerAuth: []
 paths:
   /api/billing/health:
     get:
       summary: Liveness
       description: O processo está de pé. Não consulta dependências.
-      tags: [Saúde]
+      tags:
+      - Saúde
       security: []
       responses:
-        "200":
-          description: Serviço no ar
+        '200':
+          description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Health"
+                $ref: '#/components/schemas/Health'
   /api/billing/ready:
     get:
       summary: Readiness
-      description: As dependências do serviço respondem.
-      tags: [Saúde]
+      description: O banco do serviço responde.
+      tags:
+      - Saúde
       security: []
       responses:
-        "200":
-          description: Pronto para receber tráfego
+        '200':
+          description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Health"
-        "503":
-          description: Dependência indisponível
+                $ref: '#/components/schemas/Health'
+        '503':
+          description: Banco indisponível
+  /api/billing/service-items:
+    get:
+      summary: Lista o catálogo de serviços
+      tags:
+      - Catálogo
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ServiceItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: Cria um serviço
+      tags:
+      - Catálogo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceItemInput'
+      responses:
+        '201':
+          description: Criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/billing/service-items/{id}:
+    get:
+      summary: Um serviço
+      tags:
+      - Catálogo
+      parameters: &id001
+      - &id002
+        $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Atualiza um serviço
+      tags:
+      - Catálogo
+      parameters: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ServiceItemInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Invalid'
+    delete:
+      summary: Remove um serviço
+      description: Orçamentos já gerados guardam a descrição e o preço; não são afetados.
+      tags:
+      - Catálogo
+      parameters: *id001
+      responses:
+        '204':
+          description: Removido
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/billing/parts:
+    get:
+      summary: Lista o estoque de peças
+      tags:
+      - Estoque
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Part'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      summary: Cadastra uma peça
+      tags:
+      - Estoque
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartInput'
+      responses:
+        '201':
+          description: Criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Part'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/billing/parts/{id}:
+    get:
+      summary: Uma peça
+      tags:
+      - Estoque
+      parameters: *id001
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Part'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      summary: Atualiza descrição e preço
+      description: O estoque muda só por `PATCH .../stock`; o reservado, só pelos orçamentos.
+      tags:
+      - Estoque
+      parameters: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartUpdate'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Part'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Invalid'
+    delete:
+      summary: Remove uma peça
+      description: Recusado (422) enquanto houver reserva para orçamento em aberto.
+      tags:
+      - Estoque
+      parameters: *id001
+      responses:
+        '204':
+          description: Removida
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/billing/parts/{id}/stock:
+    patch:
+      summary: Ajusta o estoque
+      description: Nunca abaixo do que está reservado (422).
+      tags:
+      - Estoque
+      parameters: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Part'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/billing/budgets:
+    get:
+      summary: Lista os orçamentos
+      description: Os mais recentes primeiro. Só admin.
+      tags:
+      - Orçamentos
+      responses:
+        '200':
+          description: Lista
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Budget'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/billing/budgets/{id}:
+    get:
+      summary: Um orçamento
+      description: O cliente só vê os dele; o de outro cliente responde 404.
+      tags:
+      - Orçamentos
+      parameters: *id001
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Budget'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/billing/budgets/by-order/{orderId}:
+    get:
+      summary: O orçamento de uma ordem de serviço
+      description: Inclui a cobrança, com o link de pagamento enquanto pendente.
+      tags:
+      - Orçamentos
+      parameters:
+      - name: orderId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Budget'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/billing/budgets/{id}/approval:
+    post:
+      summary: Resposta do cliente ao orçamento (webhook)
+      description: 'Sem JWT: exige o header `X-Webhook-Token`. Aprovar publica `budget.approved`; recusar libera
+        as peças e publica `budget.rejected`. Repetir a mesma resposta não muda nada; mudar de ideia depois de responder
+        é recusado (422).'
+      tags:
+      - Orçamentos
+      security: []
+      parameters:
+      - *id002
+      - name: X-Webhook-Token
+        in: header
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalInput'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Budget'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Invalid'
+  /api/billing/payments/{id}:
+    get:
+      summary: Um pagamento
+      description: O cliente só vê os dele.
+      tags:
+      - Pagamentos
+      parameters: *id001
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentView'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/billing/payments/webhook/mercadopago:
+    post:
+      summary: Notificação do Mercado Pago
+      description: 'Sem JWT: a autenticidade vem do header `x-signature` (HMAC-SHA256 do manifesto `id:<data.id>;request-id:<x-request-id>;ts:<ts>;`).
+        O estado do pagamento é sempre consultado na API do Mercado Pago; o corpo não é fonte de verdade. Responde
+        200 ao que foi tratado ou não interessa e 500 quando o tratamento falhou, para o Mercado Pago reenviar.'
+      tags:
+      - Pagamentos
+      security: []
+      parameters:
+      - name: data.id
+        in: query
+        schema:
+          type: string
+      - name: type
+        in: query
+        schema:
+          type: string
+          example: payment
+      - name: x-signature
+        in: header
+        required: true
+        schema:
+          type: string
+          example: ts=1704908010,v1=618c85...
+      - name: x-request-id
+        in: header
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Tratada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  outcome:
+                    type: string
+                    enum:
+                    - ok
+                    - duplicate
+                    - ignored
+        '401':
+          description: Assinatura inválida
+        '500':
+          description: Falha no tratamento; o Mercado Pago reenvia
 components:
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    Unauthorized:
+      description: Token (ou X-Webhook-Token) ausente ou inválido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Papel sem acesso à rota
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Não encontrado (ou não é do cliente)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Alterado por outra operação; tente de novo
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Invalid:
+      description: Corpo inválido ou ação fora de hora
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
     Health:
       type: object
       properties:
-        status: { type: string, example: ok }
-        service: { type: string, example: oficina-faturamento }
-        version: { type: string, example: 0.1.0 }
-        timestamp: { type: string, format: date-time }
-security:
-  - bearerAuth: []
+        status:
+          type: string
+        service:
+          type: string
+          example: oficina-faturamento
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+    ServiceItem:
+      type: object
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        base_price: &id003
+          type: number
+          format: double
+        estimated_time_minutes:
+          type: integer
+    ServiceItemInput:
+      type: object
+      required:
+      - description
+      - base_price
+      - estimated_time_minutes
+      properties:
+        description:
+          type: string
+          example: Alinhamento e balanceamento
+        base_price:
+          type: number
+          format: double
+          example: 150
+        estimated_time_minutes:
+          type: integer
+          example: 60
+    Part:
+      type: object
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        price: *id003
+        stock_quantity:
+          type: integer
+        reserved_quantity:
+          type: integer
+          description: Preso a orçamentos em aberto
+        available_quantity:
+          type: integer
+    PartInput:
+      type: object
+      required:
+      - description
+      - price
+      - stock_quantity
+      properties:
+        description:
+          type: string
+        price: *id003
+        stock_quantity:
+          type: integer
+    PartUpdate:
+      type: object
+      required:
+      - description
+      - price
+      properties:
+        description:
+          type: string
+        price: *id003
+    StockInput:
+      type: object
+      required:
+      - stock_quantity
+      properties:
+        stock_quantity:
+          type: integer
+    ApprovalInput:
+      type: object
+      required:
+      - approved
+      properties:
+        approved:
+          type: boolean
+    BudgetItem:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+          - service
+          - part
+        id:
+          type: string
+        description:
+          type: string
+        unit_price: *id003
+        quantity:
+          type: integer
+        total: *id003
+    Payment:
+      type: object
+      properties:
+        payment_id:
+          type: string
+        status:
+          type: string
+          enum:
+          - PENDING
+          - CONFIRMED
+          - FAILED
+          - REFUNDED
+          - EXPIRED
+        payment_url:
+          type: string
+          nullable: true
+          description: Só enquanto PENDING
+        amount: *id003
+        external_payment_id:
+          type: string
+          nullable: true
+        failure_reason:
+          type: string
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    PaymentView:
+      allOf:
+      - $ref: '#/components/schemas/Payment'
+      - type: object
+        properties:
+          budget_id:
+            type: string
+          os_id:
+            type: string
+    Budget:
+      type: object
+      properties:
+        id:
+          type: string
+        os_id:
+          type: string
+        saga_id:
+          type: string
+        status:
+          type: string
+          enum:
+          - AWAITING_APPROVAL
+          - APPROVED
+          - PAID
+          - REJECTED
+          - CANCELLED
+          - FAILED
+        customer:
+          type: object
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+            email:
+              type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BudgetItem'
+        total_amount: *id003
+        payment:
+          allOf:
+          - $ref: '#/components/schemas/Payment'
+          nullable: true
+        failure_reason:
+          type: string
+          nullable: true
+          example: INSUFFICIENT_STOCK
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time

@@ -7,7 +7,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 use App\Infrastructure\Config\EnvLoader;
 
 EnvLoader::loadFile(__DIR__ . '/../.env');
-EnvLoader::require(['JWT_SECRET', 'DB_HOST', 'DB_DATABASE', 'DB_USERNAME', 'DB_PASSWORD']);
+EnvLoader::require(['JWT_SECRET', 'DB_HOST', 'DB_DATABASE', 'DB_USERNAME', 'DB_PASSWORD', 'MESSAGING_TOPIC_ARN']);
 
 const SERVICE = 'oficina-faturamento';
 const PREFIX  = '/api/billing';
@@ -19,7 +19,7 @@ $appDebug  = ($_ENV['APP_DEBUG'] ?? 'false') === 'true';
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-Id, X-Webhook-Token');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Request-Id, X-Webhook-Token, X-Signature');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Referrer-Policy: strict-origin-when-cross-origin');
@@ -45,6 +45,19 @@ $healthController = new \App\Presentation\Controller\HealthController(
     static fn (): bool => \App\Infrastructure\Database\PdoConnection::getInstance()->query('SELECT 1') !== false,
 );
 
+$services          = new \App\Infrastructure\ServiceFactory($_ENV + getenv());
+$catalogController = $services->catalogController();
+$budgetController  = $services->budgetController($logger);
+$webhookController = $services->paymentWebhookController($logger);
+
+/** @return array<string, mixed> */
+$body = static function (): array {
+    $data = json_decode((string)file_get_contents('php://input'), true);
+
+    return is_array($data) ? $data : [];
+};
+$header = static fn (string $name): string => (string)($_SERVER['HTTP_' . strtoupper(str_replace('-', '_', $name))] ?? '');
+
 $router = new \App\Presentation\Router\Router();
 $router->setAuthMiddleware($authMiddleware);
 
@@ -54,6 +67,41 @@ $router->setAuthMiddleware($authMiddleware);
 
 $router->get(PREFIX . '/health', fn () => $healthController->live(), requireAuth: false);
 $router->get(PREFIX . '/ready', fn () => $healthController->ready(), requireAuth: false);
+
+// webhooks: sem JWT, cada um com a própria autenticação
+$router->post(
+    PREFIX . '/budgets/{id}/approval',
+    fn ($p) => $budgetController->approval($p, $body(), $header('X-Webhook-Token')),
+    requireAuth: false,
+);
+$router->post(
+    PREFIX . '/payments/webhook/mercadopago',
+    fn () => $webhookController->mercadoPago($_GET, $body(), [
+        'x-signature'  => $header('X-Signature'),
+        'x-request-id' => $header('X-Request-Id'),
+    ]),
+    requireAuth: false,
+);
+
+// orçamentos e pagamentos: o cliente só vê o que é dele
+$router->get(PREFIX . '/budgets', fn () => $budgetController->index())->requireRole('admin');
+$router->get(PREFIX . '/budgets/by-order/{orderId}', fn ($p, $c) => $budgetController->byOrder($p, $c))
+    ->requireRole('customer', 'admin');
+$router->get(PREFIX . '/budgets/{id}', fn ($p, $c) => $budgetController->show($p, $c))->requireRole('customer', 'admin');
+$router->get(PREFIX . '/payments/{id}', fn ($p, $c) => $budgetController->payment($p, $c))->requireRole('customer', 'admin');
+
+// catálogo e estoque: admin
+$router->get(PREFIX . '/service-items', fn () => $catalogController->listServices())->requireRole('admin');
+$router->get(PREFIX . '/service-items/{id}', fn ($p) => $catalogController->showService($p))->requireRole('admin');
+$router->post(PREFIX . '/service-items', fn () => $catalogController->createService($body()))->requireRole('admin');
+$router->put(PREFIX . '/service-items/{id}', fn ($p) => $catalogController->updateService($p, $body()))->requireRole('admin');
+$router->delete(PREFIX . '/service-items/{id}', fn ($p) => $catalogController->deleteService($p))->requireRole('admin');
+$router->get(PREFIX . '/parts', fn () => $catalogController->listParts())->requireRole('admin');
+$router->get(PREFIX . '/parts/{id}', fn ($p) => $catalogController->showPart($p))->requireRole('admin');
+$router->post(PREFIX . '/parts', fn () => $catalogController->createPart($body()))->requireRole('admin');
+$router->put(PREFIX . '/parts/{id}', fn ($p) => $catalogController->updatePart($p, $body()))->requireRole('admin');
+$router->patch(PREFIX . '/parts/{id}/stock', fn ($p) => $catalogController->updateStock($p, $body()))->requireRole('admin');
+$router->delete(PREFIX . '/parts/{id}', fn ($p) => $catalogController->deletePart($p))->requireRole('admin');
 
 $method = (string)($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $uri    = (string)($_SERVER['REQUEST_URI'] ?? '/');

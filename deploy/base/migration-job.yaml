@@ -1,0 +1,41 @@
+# Migrations do banco próprio do Faturamento (migrations/, dentro da imagem). O deploy.yml troca
+# APP_IMAGE_PLACEHOLDER pela imagem que acabou de publicar e espera o Job terminar antes do
+# rollout. O runner registra cada versão em schema_migrations e pula os arquivos _demo em
+# produção. Não substitua o placeholder por um valor fixo.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: oficina-faturamento-migrate
+  labels:
+    app: oficina-faturamento-migrate
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: oficina-faturamento-migrate
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 33
+        runAsGroup: 33
+      containers:
+        - name: migrate
+          image: APP_IMAGE_PLACEHOLDER
+          command: ["docker-entrypoint.sh", "php", "bin/migrate.php"]
+          envFrom:
+            - configMapRef:
+                name: oficina-faturamento-config
+            - secretRef:
+                name: oficina-faturamento-secret
+          env:
+            - name: MIGRATIONS_PATH
+              value: /var/www/html/migrations
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: "50m", memory: "64Mi" }
+            limits:   { cpu: "200m", memory: "128Mi" }
