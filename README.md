@@ -1,5 +1,9 @@
 # oficina-faturamento
 
+[![PR](https://github.com/bregaldahq/oficina-faturamento/actions/workflows/pr.yml/badge.svg?branch=develop)](https://github.com/bregaldahq/oficina-faturamento/actions/workflows/pr.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=bregaldahq_oficina-faturamento&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=bregaldahq_oficina-faturamento)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=bregaldahq_oficina-faturamento&metric=coverage)](https://sonarcloud.io/component_measures?id=bregaldahq_oficina-faturamento&metric=coverage)
+
 Serviço de **Faturamento** do sistema Oficina Mecânica (Tech Challenge SOAT, Fase 4):
 catálogo, estoque, orçamento e pagamento pelo Mercado Pago.
 
@@ -118,7 +122,7 @@ O ponta a ponta contra MySQL e LocalStack roda a partir do repositório principa
 
 ## Qualidade
 
-- **176 testes, 92,8% de cobertura** de linhas de `src/` (medido em 2026-11-16). Os testes de
+- **178 testes, 92,8% de cobertura** de linhas de `src/` (medido em 2026-11-16). Os testes de
   integração rodam o repositório PDO de produção contra SQLite; `tests/Integration/SchemaTest.php`
   confere que o schema dos testes é o da migration.
 - **BDD:** 7 cenários em `features/faturamento.feature`: fluxo completo, estoque insuficiente,
@@ -131,8 +135,15 @@ O ponta a ponta contra MySQL e LocalStack roda a partir do repositório principa
 - SonarCloud com quality gate no PR (projeto `bregaldahq_oficina-faturamento`).
 - `main` e `develop` protegidas: só entram por PR com as checagens verdes.
 
-<!-- Evidências (badges do Sonar e da cobertura, link do último run) entram aqui quando o
-     primeiro pipeline rodar no GitHub. -->
+### Evidências
+
+- **Cobertura por PR:** cada run do [`pr.yml`](https://github.com/bregaldahq/oficina-faturamento/actions/workflows/pr.yml)
+  escreve a linha de cobertura no resumo do run e guarda o `coverage.xml` como artefato
+  (`cobertura`); abaixo de 80% o job falha.
+- **Qualidade:** [SonarCloud](https://sonarcloud.io/summary/new_code?id=bregaldahq_oficina-faturamento), com o
+  quality gate como checagem obrigatória do PR.
+- **Deploy:** cada run do [`deploy.yml`](https://github.com/bregaldahq/oficina-faturamento/actions/workflows/deploy.yml)
+  roda os testes antes, faz o smoke depois e marca o deploy no New Relic.
 
 ## CI/CD
 

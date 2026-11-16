@@ -52,8 +52,19 @@ jobs:
       - name: Testes com cobertura
         run: vendor/bin/phpunit --coverage-clover coverage.xml --log-junit junit.xml
 
+      # A linha da cobertura vai para o resumo do run (evidência por PR), e o relatório, para o artefato.
+      # `shell: bash` liga o pipefail: sem ele o status do passo seria o do tee, sempre 0.
       - name: Cobertura mínima de 80%
-        run: php bin/check-coverage.php coverage.xml 80
+        shell: bash
+        run: php bin/check-coverage.php coverage.xml 80 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Guardar o relatório de cobertura
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura
+          path: coverage.xml
+          if-no-files-found: ignore
 
       - name: BDD (Behat)
         run: vendor/bin/behat --no-colors
