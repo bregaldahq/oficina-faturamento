@@ -24,6 +24,7 @@ use App\Infrastructure\Payment\WebhookSignature;
 use App\Infrastructure\Repository\PdoBudgetRepository;
 use App\Infrastructure\Repository\PdoCatalogRepository;
 use App\Infrastructure\Time\SystemClock;
+use App\Infrastructure\Tracing\NewRelicBusinessEvents;
 use App\Infrastructure\Tracing\NewRelicTracer;
 use App\Presentation\Controller\BudgetController;
 use App\Presentation\Controller\CatalogController;
@@ -105,7 +106,15 @@ final class ServiceFactory
     {
         return new PaymentWebhookController(
             $this->gateway(),
-            new HandlePaymentNotificationUseCase($this->budgets(), $this->gateway(), $this->messages(), new SystemClock(), $this->relay($logger), $logger),
+            new HandlePaymentNotificationUseCase(
+                $this->budgets(),
+                $this->gateway(),
+                $this->messages(),
+                new SystemClock(),
+                $this->relay($logger),
+                $logger,
+                new NewRelicBusinessEvents($this->string('APP_ENV') ?: 'local'),
+            ),
             $logger,
         );
     }

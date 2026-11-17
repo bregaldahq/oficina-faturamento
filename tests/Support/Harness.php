@@ -82,7 +82,7 @@ final class Harness
             $this->uuid,
             $this->clock,
         );
-        $this->notifications = new HandlePaymentNotificationUseCase($this->budgets, $this->gateway, $this->messages, $this->clock, $this->relay, $this->observers);
+        $this->notifications = new HandlePaymentNotificationUseCase($this->budgets, $this->gateway, $this->messages, $this->clock, $this->relay, $this->observers, $this->observers);
         $this->worker        = new Worker($this->relay, $this->bus, $this->handler, $this->observers, $this->observers);
 
         $this->catalog->saveServiceItem(new ServiceItem(self::SERVICE, 'Troca de oleo e filtro', self::SERVICE_PRICE, 40));

@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Tests\Support;
 
 use App\Application\Port\BudgetNotifierInterface;
+use App\Application\Port\BusinessEventsInterface;
 use App\Application\Port\LoggerInterface;
 use App\Application\Port\TracerInterface;
 use App\Domain\Budget\Budget;
 
 /** Logger, rastreador e aviso ao cliente que só anotam, para os testes conferirem. */
-final class RecordingObservers implements LoggerInterface, TracerInterface, BudgetNotifierInterface
+final class RecordingObservers implements LoggerInterface, TracerInterface, BudgetNotifierInterface, BusinessEventsInterface
 {
     /** @var list<array{level: string, message: string, context: array<string, mixed>}> */
     public array $logs = [];
@@ -22,6 +23,14 @@ final class RecordingObservers implements LoggerInterface, TracerInterface, Budg
     public array $notified = [];
 
     public bool $notifierFails = false;
+
+    /** @var list<array{0: string, 1: array<string, scalar|null>}> */
+    public array $events = [];
+
+    public function record(string $event, array $attributes): void
+    {
+        $this->events[] = [$event, $attributes];
+    }
 
     public function info(string $message, array $context = []): void
     {

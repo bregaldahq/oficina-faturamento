@@ -34,6 +34,7 @@ class HandlePaymentNotificationUseCaseTest extends TestCase
         $this->assertSame('payment.confirmed', $last ? $last->type : null);
         // no JSON, 558.0 vira 558: o contrato só exige um número
         $this->assertEquals($budget->total(), $last ? $last->payload['amount'] : null);
+        $this->assertSame([['PaymentConfirmed', ['paymentId' => $budget->getPayment()->externalPaymentId ?? null, 'orderId' => 'os-1', 'amount' => $budget->total()]]], $this->h->observers->events);
     }
 
     public function testMesmaNotificacaoDuasVezesTemEfeitoUmaVez(): void

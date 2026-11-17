@@ -8,6 +8,7 @@ use App\Application\Messaging\MessageFactory;
 use App\Application\Messaging\OutboxRelay;
 use App\Application\Payment\GatewayPayment;
 use App\Application\Port\BudgetRepositoryInterface;
+use App\Application\Port\BusinessEventsInterface;
 use App\Application\Port\ClockInterface;
 use App\Application\Port\LoggerInterface;
 use App\Application\Port\PaymentGatewayInterface;
@@ -38,6 +39,7 @@ final class HandlePaymentNotificationUseCase
         private readonly ClockInterface $clock,
         private readonly ?OutboxRelay $relay = null,
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?BusinessEventsInterface $events = null,
     ) {
     }
 
@@ -80,6 +82,12 @@ final class HandlePaymentNotificationUseCase
         if ($budget->canReceivePayment() && $budget->matchesTotal($payment->amount)) {
             $budget->confirmPayment($payment->id, $payment->amount, $now);
             $this->budgets->save($budget, $this->messages->fromBudget($budget), $inbox);
+            // Depois do commit: o evento só existe se o pagamento ficou gravado.
+            $this->events?->record('PaymentConfirmed', [
+                'paymentId' => $payment->id,
+                'orderId'   => $budget->getOsId(),
+                'amount'    => $payment->amount,
+            ]);
 
             return HandleIncomingMessageUseCase::OUTCOME_OK;
         }
