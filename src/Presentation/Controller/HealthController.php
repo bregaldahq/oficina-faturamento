@@ -13,7 +13,7 @@ namespace App\Presentation\Controller;
  */
 class HealthController
 {
-    private const VERSION = '0.1.0';
+    private const VERSION = '1.0.0';
 
     /** @var \Closure(): bool */
     private \Closure $dependencyCheck;

@@ -10,3 +10,7 @@ data:
   AWS_REGION: "us-east-1"
   NEW_RELIC_DISTRIBUTED_TRACING_ENABLED: "true"
   NEW_RELIC_APP_NAME: "oficina-faturamento"
+  # mercadopago em hml e prod; "fake" só em teste e no e2e
+  PAYMENT_GATEWAY: "mercadopago"
+  # Credenciais de teste do Mercado Pago devolvem o link do sandbox.
+  MP_USE_SANDBOX_URL: "false"

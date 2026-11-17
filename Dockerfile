@@ -77,6 +77,7 @@ COPY --from=vendor /app/vendor ./vendor
 COPY src ./src
 COPY public ./public
 COPY bin ./bin
+COPY migrations ./migrations
 COPY docs ./docs
 COPY swagger.yaml ./swagger.yaml
 

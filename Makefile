@@ -1,4 +1,4 @@
-.PHONY: install test coverage stan lint
+.PHONY: install test bdd coverage stan lint
 
 # A máquina de desenvolvimento não tem PHP: tudo roda em container (scripts/php.sh).
 install:
@@ -6,6 +6,9 @@ install:
 
 test:
 	scripts/php.sh vendor/bin/phpunit --no-coverage
+
+bdd:
+	scripts/php.sh vendor/bin/behat --no-colors
 
 coverage:
 	scripts/php.sh sh -c "vendor/bin/phpunit --coverage-clover coverage.xml && php bin/check-coverage.php coverage.xml 80"
